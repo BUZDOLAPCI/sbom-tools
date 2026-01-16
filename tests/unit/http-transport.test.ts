@@ -52,7 +52,7 @@ describe('HTTP Transport /mcp endpoint', () => {
   it('should respond to initialize request on /mcp', async () => {
     await startServer(currentPort);
 
-    // Send an initialize request to establish the session
+    // Send an initialize request (stateless - no session required)
     const initRequest = {
       jsonrpc: '2.0',
       id: 1,
@@ -71,31 +71,29 @@ describe('HTTP Transport /mcp endpoint', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
       },
       body: JSON.stringify(initRequest),
     });
 
     // The response should be successful (2xx status)
-    expect(initResponse.status).toBeGreaterThanOrEqual(200);
-    expect(initResponse.status).toBeLessThan(300);
+    expect(initResponse.status).toBe(200);
 
-    // Get session ID from the initialize response
-    const sessionId = initResponse.headers.get('mcp-session-id');
-    expect(sessionId).toBeTruthy();
-    expect(typeof sessionId).toBe('string');
+    const data = await initResponse.json();
+    expect(data.jsonrpc).toBe('2.0');
+    expect(data.id).toBe(1);
+    expect(data.result).toBeDefined();
+    expect(data.result.protocolVersion).toBe('2024-11-05');
+    expect(data.result.serverInfo.name).toBe('sbom-tools');
   });
 
-  it('should handle CORS preflight requests', async () => {
+  it('should return 405 for non-POST methods on /mcp', async () => {
     await startServer(currentPort);
 
     const response = await fetch(`http://127.0.0.1:${currentPort}/mcp`, {
-      method: 'OPTIONS',
+      method: 'GET',
     });
 
-    expect(response.status).toBe(204);
-    expect(response.headers.get('access-control-allow-origin')).toBe('*');
-    expect(response.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(response.status).toBe(405);
   });
 
   it('should respond to health check endpoint', async () => {
@@ -123,10 +121,10 @@ describe('HTTP Transport /mcp endpoint', () => {
     expect(data.error.code).toBe('NOT_FOUND');
   });
 
-  it('should complete full MCP handshake and list tools', async () => {
+  it('should complete full MCP handshake and list tools (stateless)', async () => {
     await startServer(currentPort);
 
-    // Step 1: Send initialize request
+    // Step 1: Send initialize request (stateless - no session tracking needed)
     const initRequest = {
       jsonrpc: '2.0',
       id: 1,
@@ -145,42 +143,16 @@ describe('HTTP Transport /mcp endpoint', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
       },
       body: JSON.stringify(initRequest),
     });
 
-    expect(initResponse.status).toBeGreaterThanOrEqual(200);
-    expect(initResponse.status).toBeLessThan(300);
+    expect(initResponse.status).toBe(200);
+    const initData = await initResponse.json();
+    expect(initData.result).toBeDefined();
+    expect(initData.result.protocolVersion).toBe('2024-11-05');
 
-    const sessionId = initResponse.headers.get('mcp-session-id');
-    expect(sessionId).toBeTruthy();
-
-    // Read the response to ensure the initialize completes
-    const initText = await initResponse.text();
-    expect(initText).toBeTruthy();
-
-    // Step 2: Send initialized notification
-    const initializedNotification = {
-      jsonrpc: '2.0',
-      method: 'notifications/initialized',
-    };
-
-    const notifResponse = await fetch(`http://127.0.0.1:${currentPort}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-        'mcp-session-id': sessionId!,
-      },
-      body: JSON.stringify(initializedNotification),
-    });
-
-    // Notification responses can be 202 Accepted or similar
-    expect(notifResponse.status).toBeGreaterThanOrEqual(200);
-    expect(notifResponse.status).toBeLessThan(300);
-
-    // Step 3: Send tools/list request
+    // Step 2: Send tools/list request (stateless - no session header needed)
     const toolsRequest = {
       jsonrpc: '2.0',
       id: 2,
@@ -192,43 +164,22 @@ describe('HTTP Transport /mcp endpoint', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-        'mcp-session-id': sessionId!,
       },
       body: JSON.stringify(toolsRequest),
     });
 
-    expect(toolsResponse.status).toBeGreaterThanOrEqual(200);
-    expect(toolsResponse.status).toBeLessThan(300);
+    expect(toolsResponse.status).toBe(200);
 
-    const toolsText = await toolsResponse.text();
-    expect(toolsText).toBeTruthy();
+    const toolsData = await toolsResponse.json();
+    expect(toolsData.jsonrpc).toBe('2.0');
+    expect(toolsData.id).toBe(2);
+    expect(toolsData.result).toBeDefined();
+    expect(toolsData.result.tools).toBeDefined();
+    expect(Array.isArray(toolsData.result.tools)).toBe(true);
 
-    // Parse the response - may be in SSE or JSON format
-    let foundTools = false;
-    const lines = toolsText.split('\n');
-
-    for (const line of lines) {
-      // Handle SSE format (data: prefix)
-      const jsonLine = line.startsWith('data: ') ? line.slice(6) : line;
-      if (!jsonLine.trim()) continue;
-
-      try {
-        const parsed = JSON.parse(jsonLine);
-        if (parsed.result && parsed.result.tools) {
-          foundTools = true;
-          expect(Array.isArray(parsed.result.tools)).toBe(true);
-
-          const toolNames = parsed.result.tools.map((t: { name: string }) => t.name);
-          expect(toolNames).toContain('sbom_from_dependencies');
-          expect(toolNames).toContain('sbom_merge');
-          expect(toolNames).toContain('sbom_diff');
-        }
-      } catch {
-        // Skip non-JSON lines
-      }
-    }
-
-    expect(foundTools).toBe(true);
-  }, 15000); // Increase timeout for this test
+    const toolNames = toolsData.result.tools.map((t: { name: string }) => t.name);
+    expect(toolNames).toContain('sbom_from_dependencies');
+    expect(toolNames).toContain('sbom_merge');
+    expect(toolNames).toContain('sbom_diff');
+  });
 });
