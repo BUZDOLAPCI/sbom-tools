@@ -1,41 +1,29 @@
 #!/usr/bin/env node
 
-import { createServer } from './server.js';
-import { createStdioTransport, createHttpTransport } from './transport/index.js';
+import { createStandaloneServer } from './server.js';
 import { getConfig } from './config.js';
 
 async function main(): Promise<void> {
   const config = getConfig();
-  const server = createServer();
 
   // Parse command line arguments
   const args = process.argv.slice(2);
   const transportArg = args.find((arg) => arg.startsWith('--transport='));
   const transport = transportArg
-    ? transportArg.split('=')[1]
-    : config.TRANSPORT;
+    ? (transportArg.split('=')[1] as 'stdio' | 'http')
+    : (config.TRANSPORT as 'stdio' | 'http');
 
-  if (transport === 'http') {
-    const httpTransport = createHttpTransport();
-    await httpTransport.start();
+  const { stop } = await createStandaloneServer({ transport });
 
-    // Handle graceful shutdown
-    const shutdown = async () => {
-      console.error('Shutting down...');
-      await httpTransport.stop();
-      process.exit(0);
-    };
+  // Handle graceful shutdown
+  const shutdown = async () => {
+    console.error('Shutting down...');
+    await stop();
+    process.exit(0);
+  };
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-  } else {
-    // Default to stdio transport
-    const stdioTransport = createStdioTransport();
-    await server.connect(stdioTransport);
-
-    // Log to stderr to avoid interfering with stdio transport
-    console.error(`${config.SERVER_NAME} v${config.SERVER_VERSION} running on stdio`);
-  }
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((error) => {

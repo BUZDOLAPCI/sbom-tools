@@ -10,6 +10,9 @@ import {
   SbomMergeInputSchema,
   SbomDiffInputSchema,
 } from './types.js';
+import { startHttpTransport } from './transport/http.js';
+import { createStdioTransport } from './transport/stdio.js';
+import { Server as HttpServer } from 'node:http';
 
 /**
  * Create and configure the MCP server with all SBOM tools
@@ -273,4 +276,57 @@ export function createServer(): Server {
   });
 
   return server;
+}
+
+interface StandaloneServerOptions {
+  transport?: 'stdio' | 'http';
+  httpPort?: number;
+  httpHost?: string;
+}
+
+interface StandaloneServer {
+  server: Server;
+  httpServer?: HttpServer;
+  stop: () => Promise<void>;
+}
+
+/**
+ * Create and start a standalone MCP server with the specified transport
+ * This is the recommended way to start the server for deployment
+ */
+export async function createStandaloneServer(
+  options: StandaloneServerOptions = {}
+): Promise<StandaloneServer> {
+  const config = getConfig();
+  const transport = options.transport ?? (config.TRANSPORT as 'stdio' | 'http');
+
+  if (transport === 'http') {
+    const { server: httpServer, stop } = startHttpTransport(createServer, {
+      port: options.httpPort,
+      host: options.httpHost,
+    });
+
+    // Create a reference server for the return value
+    const server = createServer();
+
+    return {
+      server,
+      httpServer,
+      stop,
+    };
+  } else {
+    // Default to stdio transport
+    const server = createServer();
+    const stdioTransport = createStdioTransport();
+    await server.connect(stdioTransport);
+
+    console.error(`${config.SERVER_NAME} v${config.SERVER_VERSION} running on stdio`);
+
+    return {
+      server,
+      stop: async () => {
+        await server.close();
+      },
+    };
+  }
 }
