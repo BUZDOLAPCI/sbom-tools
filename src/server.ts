@@ -11,7 +11,6 @@ import {
   SbomDiffInputSchema,
 } from './types.js';
 import { startHttpTransport } from './transport/http.js';
-import { createStdioTransport } from './transport/stdio.js';
 import { Server as HttpServer } from 'node:http';
 
 /**
@@ -279,54 +278,34 @@ export function createServer(): Server {
 }
 
 interface StandaloneServerOptions {
-  transport?: 'stdio' | 'http';
   httpPort?: number;
   httpHost?: string;
 }
 
 interface StandaloneServer {
   server: Server;
-  httpServer?: HttpServer;
+  httpServer: HttpServer;
   stop: () => Promise<void>;
 }
 
 /**
- * Create and start a standalone MCP server with the specified transport
- * This is the recommended way to start the server for deployment
+ * Create and start the HTTP MCP server
+ * This is the only supported transport for Dedalus deployment
  */
 export async function createStandaloneServer(
   options: StandaloneServerOptions = {}
 ): Promise<StandaloneServer> {
-  const config = getConfig();
-  const transport = options.transport ?? (config.TRANSPORT as 'stdio' | 'http');
+  const { server: httpServer, stop } = startHttpTransport(createServer, {
+    port: options.httpPort,
+    host: options.httpHost,
+  });
 
-  if (transport === 'http') {
-    const { server: httpServer, stop } = startHttpTransport(createServer, {
-      port: options.httpPort,
-      host: options.httpHost,
-    });
+  // Create a reference server for the return value
+  const server = createServer();
 
-    // Create a reference server for the return value
-    const server = createServer();
-
-    return {
-      server,
-      httpServer,
-      stop,
-    };
-  } else {
-    // Default to stdio transport
-    const server = createServer();
-    const stdioTransport = createStdioTransport();
-    await server.connect(stdioTransport);
-
-    console.error(`${config.SERVER_NAME} v${config.SERVER_VERSION} running on stdio`);
-
-    return {
-      server,
-      stop: async () => {
-        await server.close();
-      },
-    };
-  }
+  return {
+    server,
+    httpServer,
+    stop,
+  };
 }

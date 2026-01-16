@@ -1,6 +1,6 @@
 // Main exports for programmatic usage
 export { createServer, createStandaloneServer } from './server.js';
-export { createStdioTransport, createHttpTransport, startHttpTransport } from './transport/index.js';
+export { createHttpTransport, startHttpTransport } from './transport/index.js';
 export { sbomFromDependencies, sbomMerge, sbomDiff } from './tools/index.js';
 export { getConfig } from './config.js';
 export type { Config } from './config.js';
