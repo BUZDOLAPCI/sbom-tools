@@ -6,8 +6,8 @@ const ConfigSchema = z.object({
   SERVER_VERSION: z.string().default('1.0.0'),
 
   // Transport configuration
-  TRANSPORT: z.enum(['stdio', 'http']).default('stdio'),
-  HTTP_PORT: z.coerce.number().int().positive().default(3000),
+  TRANSPORT: z.enum(['stdio', 'http']).default('http'),
+  HTTP_PORT: z.coerce.number().int().positive().default(8080),
   HTTP_HOST: z.string().default('127.0.0.1'),
 
   // Logging
